@@ -1,0 +1,103 @@
+#!/bin/bash
+
+# b2 [BranchBuster] - A simple utility script that removes gone branches from the local repository.
+
+set -eou pipefail
+
+readonly VERSION="0.1.0"
+
+# Find gone git branches locally
+function find_gone_branches() {
+  git fetch -p || { echo "Failed to fetch from upstream. Aborting."; exit 1; }
+  git branch -vv \
+    | grep ': gone]' \
+    | grep -v "\*" \
+    | awk '{ print $1; }' \
+    | grep -v '^$' || true
+}
+
+# Delete gone branches from the local repository
+function delete_gone_branches() {
+  local branches=("$@")
+  local branch
+  for branch in "${branches[@]}"; do
+    git branch -D "$branch" || echo "Failed to delete branch: $branch"
+  done
+}
+
+# Ask for user input to delete gone branches
+function ask_for_user_input() {
+  local answer
+  local gone_branches=("$@")
+  local main_prompt
+  local selection
+  local selected_branches=()
+
+  echo "The following branches are gone:"
+  for i in "${!gone_branches[@]}"; do
+    echo "$((i + 1)). ${gone_branches[$i]}"
+  done
+
+  main_prompt="Enter 'y' to delete all, 'n' to skip, or select by number: "
+
+  while true; do
+    read -r -p "$main_prompt" answer
+    if [[ "$answer" =~ ^[Yy] ]]; then
+      delete_gone_branches "${gone_branches[@]}"
+      break
+    elif [[ "$answer" =~ ^[Nn] ]]; then
+      echo "No branches deleted."
+      break
+    elif [[ "$answer" =~ ^[0-9]+( [0-9]+)*$ ]]; then
+      selection="$answer"
+      local number
+      for number in $selection; do
+        if ((number > 0 && number <= ${#gone_branches[@]})); then
+          selected_branches+=("${gone_branches[$((number - 1))]}")
+        else
+          echo "Invalid branch number: $number"
+        fi
+      done
+
+      if [ "${#selected_branches[@]}" -gt 0 ]; then
+        echo "You selected the following branches for deletion:"
+        printf '%s\n' "${selected_branches[@]}"
+        delete_gone_branches "${selected_branches[@]}"
+      else
+        echo "No valid selections made."
+      fi
+      break
+    else
+      printf "%s" "Invalid input. Please enter 'y', 'n', " \
+                  "or branch numbers separated by spaces."
+    fi
+  done
+}
+
+# It just shows the version of the script
+function show_version() {
+  local current_year
+  current_year=$(date +'%Y')
+  printf "\nb2 [BranchBuster] v%s (c) %s\n" "$VERSION" "$current_year"
+}
+
+# Main function
+function main() {
+  local line
+  local gone_branches=()
+  echo "Checking for gone branches..."
+  while IFS= read -r line; do
+    if [[ -n "$line" ]]; then
+      gone_branches+=("$line")
+    fi
+  done < <(find_gone_branches)
+  if [ "${#gone_branches[@]}" -gt 0 ]; then
+    ask_for_user_input "${gone_branches[@]}"
+    show_version
+  else
+    echo "No gone branches found!"
+    show_version
+  fi
+}
+
+main
