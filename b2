@@ -4,7 +4,7 @@
 
 set -eou pipefail
 
-readonly VERSION="0.1.0"
+readonly VERSION="0.1.1"
 
 # Find gone git branches locally
 function find_gone_branches() {
@@ -20,6 +20,7 @@ function find_gone_branches() {
 function delete_gone_branches() {
   local branches=("$@")
   local branch
+  printf "\nDeleting the following branches:\n"
   for branch in "${branches[@]}"; do
     git branch -D "$branch" || echo "Failed to delete branch: $branch"
   done
