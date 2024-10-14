@@ -79,7 +79,7 @@ function ask_for_user_input() {
 function show_version() {
   local current_year
   current_year=$(date +'%Y')
-  printf "\nb2 [BranchBuster] v%s (c) %s\n" "$VERSION" "$current_year"
+  printf "\nb2 [BranchBuster] v%s (c) baduker %s\n" "$VERSION" "$current_year"
 }
 
 # Main function
