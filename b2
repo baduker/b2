@@ -4,7 +4,38 @@
 
 set -euo pipefail
 
-readonly VERSION="0.2.0"
+readonly VERSION="0.2.1"
+
+: <<'HELP'
+Usage: b2 [options]
+
+b2 is a utility script that removes gone branches from the local repository.
+
+Options:
+  --help       Show this help message
+  --version    Show script version
+
+Examples:
+
+  # Remove gone branches from the local repository
+
+  $ cd /path/to/repo
+  $ b2
+
+HELP
+
+# show usage message
+show_usage() {
+  echo "Usage: b2 [options]"
+  echo "Options:"
+  echo "  --help       Show this help message"
+  echo "  --version    Show script version"
+}
+
+# show help message
+show_help() {
+  echo -e "\nA utility script that removes gone branches from the local repository."
+}
 
 # Find gone git branches locally
 find_gone_branches() {
@@ -17,8 +48,6 @@ delete_gone_branches() {
   set +e
   local branch
   local branches=("$@")
-  echo -e "\nDeleting the following branches:"
-  printf '%s\n' "${branches[@]}"
   for branch in "${branches[@]}"; do
     git branch -D "$branch" || echo "Failed to delete branch: $branch"
   done
@@ -77,13 +106,20 @@ ask_for_user_input() {
 show_version() {
   local current_year
   current_year=$(date +'%Y')
-  echo -e "\nb2 [BranchBuster] v$VERSION %s | coded by baduker" $current_year
+  echo -e "\nb2 [BranchBuster] v$VERSION %s | coded by baduker" "$current_year"
 }
 
 # Main function
 main() {
   local line
   local gone_branches
+
+  # Show help message if user passes --help option
+  if [ "$#" -eq 1 ] && [ "$1" = "--help" ]; then
+    show_help
+    exit 0
+  fi
+
   echo "Checking for gone branches..."
   gone_branches=()
   while IFS= read -r line; do
