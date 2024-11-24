@@ -106,7 +106,7 @@ ask_for_user_input() {
 show_version() {
   local current_year
   current_year=$(date +'%Y')
-  echo -e "\nb2 [BranchBuster] v${VERSION} | (c) baduker ${current_year}"
+  echo -e "\nb2 [BranchBuster] v${VERSION} | (c) ${current_year} baduker" 
 }
 
 # Main function
