@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-readonly VERSION="0.2.2"
+readonly VERSION="0.2.3"
 
 : <<'HELP'
 Usage: b2 [options]
@@ -13,15 +13,17 @@ b2 is a utility script that removes gone branches from the local repository.
 
 Options:
   --help       Show this help message
+  --force      Force delete branches without asking for confirmation
   --version    Show script version
 
 Examples:
 
   # Remove gone branches from the local repository
-
   $ cd /path/to/repo
   $ b2
 
+  # Remove gone branches without asking for confirmation
+  $ b2 --force
 HELP
 
 # show usage message
@@ -29,12 +31,14 @@ show_usage() {
   echo "Usage: b2 [options]"
   echo "Options:"
   echo "  --help       Show this help message"
+  echo "  --force      Force delete branches without asking for confirmation"
   echo "  --version    Show script version"
 }
 
 # show help message
 show_help() {
   echo -e "\nA utility script that removes gone branches from the local repository."
+  show_usage
 }
 
 # Find gone git branches locally
@@ -106,32 +110,50 @@ ask_for_user_input() {
 show_version() {
   local current_year
   current_year=$(date +'%Y')
-  echo -e "\nb2 [BranchBuster] v${VERSION} | (c) ${current_year} baduker" 
+  echo -e "\nb2 [BranchBuster] v${VERSION} | (c) ${current_year} baduker"
 }
 
 # Main function
 main() {
-  local line
-  local gone_branches
+  local force_delete=false
 
-  # Show help message if user passes --help option
-  if [ "$#" -eq 1 ] && [ "$1" = "--help" ]; then
-    show_help
-    exit 0
-  fi
-
-  if [ "$#" -eq 1 ] && [ "$1" = "--version" ]; then
-    show_version
-    exit 0
-  fi
+  # Parse arguments
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --help)
+        show_help
+        exit 0
+        ;;
+      --version)
+        show_version
+        exit 0
+        ;;
+      --force)
+        force_delete=true
+        ;;
+      *)
+        echo "Unknown option: $1"
+        show_usage
+        exit 1
+        ;;
+    esac
+    shift
+  done
 
   echo "Checking for gone branches..."
-  gone_branches=()
+  local -a gone_branches=()
   while IFS= read -r line; do
     gone_branches+=("$line")
   done < <(find_gone_branches)
+
   if [ "${#gone_branches[@]}" -gt 0 ]; then
-    ask_for_user_input "${gone_branches[@]}"
+    if [ "$force_delete" = true ]; then
+      echo "Force deleting the following gone branches:"
+      printf '%s\n' "${gone_branches[@]}"
+      delete_gone_branches "${gone_branches[@]}"
+    else
+      ask_for_user_input "${gone_branches[@]}"
+    fi
     show_version
   else
     echo -e "\nNo gone branches found!"
