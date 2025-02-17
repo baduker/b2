@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-readonly VERSION="0.2.3"
+readonly VERSION="0.2.4"
 
 : <<'HELP'
 Usage: b2 [options]
@@ -148,8 +148,9 @@ main() {
 
   if [ "${#gone_branches[@]}" -gt 0 ]; then
     if [ "$force_delete" = true ]; then
-      echo "Force deleting the following gone branches:"
+      printf "\nForce deleting the following gone branches:\n"
       printf '%s\n' "${gone_branches[@]}"
+      echo "-------------------------------------------------"
       delete_gone_branches "${gone_branches[@]}"
     else
       ask_for_user_input "${gone_branches[@]}"

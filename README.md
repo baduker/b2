@@ -30,3 +30,20 @@ make upgrade
 
 This basically fetches the latest changes from the remote repository and
 replaces the script with the latest version.
+
+## Usage
+
+To use `b2`, simply run the script in your git repository:
+
+```bash
+b2
+```
+
+This will show you the branches that have been removed from the remote repository 
+but still exist locally. You can then choose to delete these branches.
+
+`--force` flag can be used to delete all the gone branches without any prompt:
+
+```bash
+b2 --force
+```
