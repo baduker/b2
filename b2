@@ -1,70 +1,80 @@
 #!/bin/bash
 
-# b2 [BranchBuster] - A utility script that removes gone branches from the local repository.
+# b2 [BranchBuster] - A utility script that removes gone AND merged branches.
 
 set -euo pipefail
 
-readonly VERSION="0.2.4"
+readonly VERSION="0.3.0"
+
+# automatically detect main or master
+readonly MAIN_BRANCH=$(
+  git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null \
+    | sed 's@^refs/remotes/origin/@@' || echo "main"
+  )
 
 : <<'HELP'
 Usage: b2 [options]
-
-b2 is a utility script that removes gone branches from the local repository.
-
-Options:
-  --help       Show this help message
-  --force      Force delete branches without asking for confirmation
-  --version    Show script version
-
-Examples:
-
-  # Remove gone branches from the local repository
-  $ cd /path/to/repo
-  $ b2
-
-  # Remove gone branches without asking for confirmation
-  $ b2 --force
 HELP
 
 # show usage message
 show_usage() {
   echo "Usage: b2 [options]"
   echo "Options:"
-  echo "  --help       Show this help message"
-  echo "  --force      Force delete branches without asking for confirmation"
-  echo "  --version    Show script version"
+  echo "  --help        Show this help message"
+  echo "  --force       Force delete branches without asking for confirmation"
+  echo "  --version     Show script version"
 }
 
-# show help message
 show_help() {
-  echo -e "\nA utility script that removes gone branches from the local repository."
+  echo -e "\nA utility script that removes gone and merged branches from the local repository."
   show_usage
 }
 
-# Find gone git branches locally
-find_gone_branches() {
-  git fetch -p
-  git branch -vv | awk '/: gone]/{if ($1 != "*") print $1}'
+find_prunable_branches() {
+  # 1. Update remote list
+  git fetch -p > /dev/null 2>&1
+
+  # 2. Get branches that track a deleted remote (The "Gone" ones)
+  local gone_branches
+  gone_branches=$(git for-each-ref --format '%(refname:short) %(upstream:track)' refs/heads | \
+    awk '$2 == "[gone]" {print $1}')
+
+  # 3. Get branches that are already merged into main/master (The "Merged" ones)
+  # We exclude the main branch itself and the current HEAD to prevent accidents.
+  local merged_branches
+  merged_branches=$(git branch --merged "$MAIN_BRANCH" | \
+    sed 's/^[ *]*//' | \
+    grep -vE "^($MAIN_BRANCH|master|main|dev|development)$")
+
+  # 4. Combine lists, sort, and remove duplicates
+  echo -e "$gone_branches\n$merged_branches" | sort | uniq | grep -v "^$"
 }
 
-# Delete gone branches from the local repository
-delete_gone_branches() {
+delete_branches() {
   set +e
   local branch
   local branches=("$@")
+  local current_branch
+  current_branch=$(git branch --show-current)
+
   for branch in "${branches[@]}"; do
+    if [[ "$branch" == "$current_branch" ]]; then
+        echo "Skipping currently checked out branch: $branch"
+        continue
+    fi
+    # -D forces deletion even if git thinks it's not merged (useful for the [gone] ones)
     git branch -D "$branch" || echo "Failed to delete branch: $branch"
   done
   set -e
 }
 
-# Ask for user input to delete gone branches
 ask_for_user_input() {
   local answer
-  local gone_branches=("$@")
-  echo "The following branches are gone:"
-  for i in "${!gone_branches[@]}"; do
-    echo "$((i + 1)). ${gone_branches[$i]}"
+  local branches_to_kill=("$@")
+  
+  echo "The following branches are safe to delete (Merged or Gone):"
+  for i in "${!branches_to_kill[@]}"; do
+    echo "$((i + 1)). ${branches_to_kill[$i]}"
   done
 
   local main_prompt="Enter 'y' to delete all, 'n' to skip, or select by number: "
@@ -72,7 +82,7 @@ ask_for_user_input() {
     read -r -p "$main_prompt" answer
     case "$answer" in
       [Yy])
-        delete_gone_branches "${gone_branches[@]}"
+        delete_branches "${branches_to_kill[@]}"
         break
         ;;
       [Nn])
@@ -84,82 +94,60 @@ ask_for_user_input() {
           local number
           local selected_branches=()
           for number in $answer; do
-            if ((number > 0 && number <= ${#gone_branches[@]})); then
-              selected_branches+=("${gone_branches[$((number - 1))]}")
+            if ((number > 0 && number <= ${#branches_to_kill[@]})); then
+              selected_branches+=("${branches_to_kill[$((number - 1))]}")
             else
               echo "Invalid branch number: $number"
             fi
           done
           if [ "${#selected_branches[@]}" -gt 0 ]; then
-            echo "You selected the following branches for deletion:"
-            printf '%s\n' "${selected_branches[@]}"
-            delete_gone_branches "${selected_branches[@]}"
-          else
-            echo "No valid selections made."
+             delete_branches "${selected_branches[@]}"
           fi
           break
         else
-          echo "Invalid input. Please enter 'y', 'n', or branch numbers separated by spaces."
+          echo "Invalid input."
         fi
         ;;
     esac
   done
 }
 
-# Show the version of the script
 show_version() {
-  local current_year
-  current_year=$(date +'%Y')
-  echo -e "\nb2 [BranchBuster] v${VERSION} | (c) ${current_year} baduker"
+  echo -e "\nb2 [BranchBuster] v${VERSION}"
 }
 
-# Main function
 main() {
   local force_delete=false
 
-  # Parse arguments
   while [ $# -gt 0 ]; do
     case "$1" in
-      --help)
-        show_help
-        exit 0
-        ;;
-      --version)
-        show_version
-        exit 0
-        ;;
-      --force)
-        force_delete=true
-        ;;
-      *)
-        echo "Unknown option: $1"
-        show_usage
-        exit 1
-        ;;
+      --help) show_help; exit 0 ;;
+      --version) show_version; exit 0 ;;
+      --force) force_delete=true ;;
+      *) echo "Unknown option: $1"; show_usage; exit 1 ;;
     esac
     shift
   done
 
-  echo "Checking for gone branches..."
-  local -a gone_branches=()
+  echo "Scanning for branches merged into '$MAIN_BRANCH' or with deleted remotes..."
+  
+  local -a branches_to_kill=()
   while IFS= read -r line; do
-    gone_branches+=("$line")
-  done < <(find_gone_branches)
+    branches_to_kill+=("$line")
+  done < <(find_prunable_branches)
 
-  if [ "${#gone_branches[@]}" -gt 0 ]; then
+  if [ "${#branches_to_kill[@]}" -gt 0 ]; then
     if [ "$force_delete" = true ]; then
-      printf "\nForce deleting the following gone branches:\n"
-      printf '%s\n' "${gone_branches[@]}"
-      echo "-------------------------------------------------"
-      delete_gone_branches "${gone_branches[@]}"
+      printf "\nForce deleting:\n"
+      printf '%s\n' "${branches_to_kill[@]}"
+      delete_branches "${branches_to_kill[@]}"
     else
-      ask_for_user_input "${gone_branches[@]}"
+      ask_for_user_input "${branches_to_kill[@]}"
     fi
-    show_version
   else
-    echo -e "\nNo gone branches found!"
-    show_version
+    echo -e "\nClean! No merged or gone branches found."
   fi
+  show_version
 }
 
 main "$@"
