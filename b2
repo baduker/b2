@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-readonly VERSION="0.3.0"
+readonly VERSION="0.3.1"
 
 # automatically detect main or master
 readonly MAIN_BRANCH=$(
@@ -34,19 +34,17 @@ find_prunable_branches() {
   # 1. Update remote list
   git fetch -p > /dev/null 2>&1
 
-  # 2. Get branches that track a deleted remote (The "Gone" ones)
+  # 2. Get "Gone" branches (Using your working 0.2.3 logic)
   local gone_branches
-  gone_branches=$(git for-each-ref --format '%(refname:short) %(upstream:track)' refs/heads | \
-    awk '$2 == "[gone]" {print $1}')
+  gone_branches=$(git branch -vv | awk '/: gone]/{if ($1 != "*") print $1}')
 
-  # 3. Get branches that are already merged into main/master (The "Merged" ones)
-  # We exclude the main branch itself and the current HEAD to prevent accidents.
+  # 3. Get "Merged" branches (Excluding main/master/dev)
   local merged_branches
   merged_branches=$(git branch --merged "$MAIN_BRANCH" | \
     sed 's/^[ *]*//' | \
     grep -vE "^($MAIN_BRANCH|master|main|dev|development)$")
 
-  # 4. Combine lists, sort, and remove duplicates
+  # 4. Combine and cleanup
   echo -e "$gone_branches\n$merged_branches" | sort | uniq | grep -v "^$"
 }
 
