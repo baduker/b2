@@ -4,19 +4,22 @@
 
 set -euo pipefail
 
-readonly VERSION="0.3.0"
+readonly VERSION="0.3.3"
 
-# automatically detect main or master
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "Error: Not in a git repository."
+  exit 1
+fi
+
 readonly MAIN_BRANCH=$(
   git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null \
     | sed 's@^refs/remotes/origin/@@' || echo "main"
-  )
+)
 
 : <<'HELP'
 Usage: b2 [options]
 HELP
 
-# show usage message
 show_usage() {
   echo "Usage: b2 [options]"
   echo "Options:"
@@ -31,22 +34,14 @@ show_help() {
 }
 
 find_prunable_branches() {
-  # 1. Update remote list
-  git fetch -p > /dev/null 2>&1
-
-  # 2. Get branches that track a deleted remote (The "Gone" ones)
   local gone_branches
-  gone_branches=$(git for-each-ref --format '%(refname:short) %(upstream:track)' refs/heads | \
-    awk '$2 == "[gone]" {print $1}')
+  gone_branches=$(git for-each-ref --format '%(refname:short) %(upstream:track)' refs/heads | awk '$2 == "[gone]" {print $1}')
 
-  # 3. Get branches that are already merged into main/master (The "Merged" ones)
-  # We exclude the main branch itself and the current HEAD to prevent accidents.
   local merged_branches
   merged_branches=$(git branch --merged "$MAIN_BRANCH" | \
     sed 's/^[ *]*//' | \
     grep -vE "^($MAIN_BRANCH|master|main|dev|development)$")
 
-  # 4. Combine lists, sort, and remove duplicates
   echo -e "$gone_branches\n$merged_branches" | sort | uniq | grep -v "^$"
 }
 
@@ -59,10 +54,9 @@ delete_branches() {
 
   for branch in "${branches[@]}"; do
     if [[ "$branch" == "$current_branch" ]]; then
-        echo "Skipping currently checked out branch: $branch"
-        continue
+      echo "Skipping currently checked out branch: $branch"
+      continue
     fi
-    # -D forces deletion even if git thinks it's not merged (useful for the [gone] ones)
     git branch -D "$branch" || echo "Failed to delete branch: $branch"
   done
   set -e
@@ -71,43 +65,43 @@ delete_branches() {
 ask_for_user_input() {
   local answer
   local branches_to_kill=("$@")
-  
+
   echo "The following branches are safe to delete (Merged or Gone):"
   for i in "${!branches_to_kill[@]}"; do
     echo "$((i + 1)). ${branches_to_kill[$i]}"
   done
 
-  local main_prompt="Enter 'y' to delete all, 'n' to skip, or select by number: "
+  local main_prompt="Enter 'y' to delete all, 'n' to skip, or select by number (e.g., 1 3): "
   while true; do
     read -r -p "$main_prompt" answer
     case "$answer" in
-      [Yy])
-        delete_branches "${branches_to_kill[@]}"
-        break
-        ;;
-      [Nn])
-        echo "No branches deleted."
-        break
-        ;;
-      *)
-        if [[ "$answer" =~ ^[0-9]+( [0-9]+)*$ ]]; then
-          local number
-          local selected_branches=()
-          for number in $answer; do
-            if ((number > 0 && number <= ${#branches_to_kill[@]})); then
-              selected_branches+=("${branches_to_kill[$((number - 1))]}")
-            else
-              echo "Invalid branch number: $number"
-            fi
-          done
-          if [ "${#selected_branches[@]}" -gt 0 ]; then
-             delete_branches "${selected_branches[@]}"
+    [Yy])
+      delete_branches "${branches_to_kill[@]}"
+      break
+      ;;
+    [Nn])
+      echo "No branches deleted."
+      break
+      ;;
+    *)
+      if [[ "$answer" =~ ^[0-9]+( [0-9]+)*$ ]]; then
+        local number
+        local selected_branches=()
+        for number in $answer; do
+          if ((number > 0 && number <= ${#branches_to_kill[@]})); then
+            selected_branches+=("${branches_to_kill[$((number - 1))]}")
+          else
+            echo "Invalid branch number: $number"
           fi
-          break
-        else
-          echo "Invalid input."
+        done
+        if [ "${#selected_branches[@]}" -gt 0 ]; then
+          delete_branches "${selected_branches[@]}"
         fi
-        ;;
+        break
+      else
+        echo "Invalid input. Please enter 'y', 'n', or space-separated numbers."
+      fi
+      ;;
     esac
   done
 }
@@ -121,20 +115,27 @@ main() {
 
   while [ $# -gt 0 ]; do
     case "$1" in
-      --help) show_help; exit 0 ;;
-      --version) show_version; exit 0 ;;
-      --force) force_delete=true ;;
-      *) echo "Unknown option: $1"; show_usage; exit 1 ;;
+    --help) show_help; exit 0 ;;
+    --version) show_version; exit 0 ;;
+    --force) force_delete=true ;;
+    *) echo "Unknown option: $1"; show_usage; exit 1 ;;
     esac
     shift
   done
 
+  echo "Fetching remote updates..."
+  git fetch -p > /dev/null 2>&1
+
   echo "Scanning for branches merged into '$MAIN_BRANCH' or with deleted remotes..."
-  
+
+  local raw_branches
+  raw_branches=$(find_prunable_branches)
+
   local -a branches_to_kill=()
-  while IFS= read -r line; do
-    branches_to_kill+=("$line")
-  done < <(find_prunable_branches)
+
+  if [[ -n "$raw_branches" ]]; then
+    mapfile -t branches_to_kill <<< "$raw_branches"
+  fi
 
   if [ "${#branches_to_kill[@]}" -gt 0 ]; then
     if [ "$force_delete" = true ]; then
@@ -147,6 +148,7 @@ main() {
   else
     echo -e "\nClean! No merged or gone branches found."
   fi
+
   show_version
 }
 
