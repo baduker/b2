@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-readonly VERSION="0.3.3"
+readonly VERSION="0.3.4"
 
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo "Error: Not in a git repository."
@@ -40,9 +40,9 @@ find_prunable_branches() {
   local merged_branches
   merged_branches=$(git branch --merged "$MAIN_BRANCH" | \
     sed 's/^[ *]*//' | \
-    grep -vE "^($MAIN_BRANCH|master|main|dev|development)$")
+    grep -vE "^($MAIN_BRANCH|master|main|dev|development)$" || true)
 
-  echo -e "$gone_branches\n$merged_branches" | sort | uniq | grep -v "^$"
+  printf "%s\n%s\n" "$gone_branches" "$merged_branches" | sort -u | grep -v "^$" || true
 }
 
 delete_branches() {
@@ -57,6 +57,7 @@ delete_branches() {
       echo "Skipping currently checked out branch: $branch"
       continue
     fi
+    # -D forces deletion
     git branch -D "$branch" || echo "Failed to delete branch: $branch"
   done
   set -e
@@ -66,7 +67,7 @@ ask_for_user_input() {
   local answer
   local branches_to_kill=("$@")
 
-  echo "The following branches are safe to delete (Merged or Gone):"
+  echo -e "\nThe following branches are safe to delete (Merged or Gone):"
   for i in "${!branches_to_kill[@]}"; do
     echo "$((i + 1)). ${branches_to_kill[$i]}"
   done
@@ -134,7 +135,9 @@ main() {
   local -a branches_to_kill=()
 
   if [[ -n "$raw_branches" ]]; then
-    mapfile -t branches_to_kill <<< "$raw_branches"
+    while IFS= read -r line; do
+      branches_to_kill+=("$line")
+    done <<< "$raw_branches"
   fi
 
   if [ "${#branches_to_kill[@]}" -gt 0 ]; then
