@@ -4,21 +4,12 @@
 
 set -euo pipefail
 
-readonly VERSION="0.3.4"
+readonly VERSION="0.3.5"
 
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo "Error: Not in a git repository."
   exit 1
 fi
-
-readonly MAIN_BRANCH=$(
-  git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null \
-    | sed 's@^refs/remotes/origin/@@' || echo "main"
-)
-
-: <<'HELP'
-Usage: b2 [options]
-HELP
 
 show_usage() {
   echo "Usage: b2 [options]"
@@ -34,19 +25,19 @@ show_help() {
 }
 
 find_prunable_branches() {
+  local main_branch="$1"
   local gone_branches
   gone_branches=$(git for-each-ref --format '%(refname:short) %(upstream:track)' refs/heads | awk '$2 == "[gone]" {print $1}')
 
   local merged_branches
-  merged_branches=$(git branch --merged "$MAIN_BRANCH" | \
+  merged_branches=$(git branch --merged "$main_branch" | \
     sed 's/^[ *]*//' | \
-    grep -vE "^($MAIN_BRANCH|master|main|dev|development)$" || true)
+    grep -vE "^($main_branch|master|main|dev|development)$" || true)
 
   printf "%s\n%s\n" "$gone_branches" "$merged_branches" | sort -u | grep -v "^$" || true
 }
 
 delete_branches() {
-  set +e
   local branch
   local branches=("$@")
   local current_branch
@@ -57,10 +48,12 @@ delete_branches() {
       echo "Skipping currently checked out branch: $branch"
       continue
     fi
-    # -D forces deletion
-    git branch -D "$branch" || echo "Failed to delete branch: $branch"
+    if git branch -D "$branch"; then
+      echo "Deleted: $branch"
+    else
+      echo "Failed to delete: $branch"
+    fi
   done
-  set -e
 }
 
 ask_for_user_input() {
@@ -124,16 +117,21 @@ main() {
     shift
   done
 
-  echo "Fetching remote updates..."
-  git fetch -p > /dev/null 2>&1
+  local main_branch
+  main_branch=$(
+    git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null \
+      | sed 's@^refs/remotes/origin/@@' || echo "main"
+  )
 
-  echo "Scanning for branches merged into '$MAIN_BRANCH' or with deleted remotes..."
+  echo "Fetching remote updates..."
+  git fetch -p >/dev/null 2>&1
+
+  echo "Scanning for branches merged into '$main_branch' or with deleted remotes..."
 
   local raw_branches
-  raw_branches=$(find_prunable_branches)
+  raw_branches=$(find_prunable_branches "$main_branch")
 
   local -a branches_to_kill=()
-
   if [[ -n "$raw_branches" ]]; then
     while IFS= read -r line; do
       branches_to_kill+=("$line")
@@ -142,8 +140,7 @@ main() {
 
   if [ "${#branches_to_kill[@]}" -gt 0 ]; then
     if [ "$force_delete" = true ]; then
-      printf "\nForce deleting:\n"
-      printf '%s\n' "${branches_to_kill[@]}"
+      echo -e "\nForce deleting:"
       delete_branches "${branches_to_kill[@]}"
     else
       ask_for_user_input "${branches_to_kill[@]}"
